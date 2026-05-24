@@ -7,6 +7,7 @@
 
 pub mod error;
 pub mod format;
+pub mod lz77;
 
 use std::fs;
 use std::path::{Path, PathBuf};
