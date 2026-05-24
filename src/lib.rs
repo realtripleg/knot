@@ -1,69 +1,147 @@
 //! knot — a from-scratch compression format.
 //!
-//! Stage 0 is a passthrough: `tie` and `untie` just copy bytes so we can
-//! exercise the CLI and file I/O before any real compression exists.
+//! Stage 1: the real `.knot` header (magic, version, flags, filename, size,
+//! CRC32) written in "stored" mode — the payload is still the raw bytes, but
+//! everything around it is the actual format, and untie now verifies the
+//! checksum. Compression lands in later stages.
+
+pub mod error;
+pub mod format;
 
 use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 
-/// Tie `input` into `<input>.knot`.
-pub fn tie(input: &Path) -> io::Result<()> {
+use error::{KnotError, Result};
+use format::Header;
+
+/// Tie `input` into `<input>.knot` (stage 1: stored, uncompressed payload).
+pub fn tie(input: &Path) -> Result<()> {
     let data = fs::read(input)?;
 
-    // Append ".knot" to the whole name, like gzip turns `notes.txt` into
-    // `notes.txt.gz`. We work on the OS string so odd (non-UTF-8) names survive.
-    let mut out_name = input.as_os_str().to_owned();
-    out_name.push(".knot");
-    let output = PathBuf::from(out_name);
-
-    fs::write(&output, &data)?;
-    println!(
-        "tied {} -> {} ({} bytes, stage 0: stored as-is)",
-        input.display(),
-        output.display(),
-        data.len()
-    );
-    Ok(())
-}
-
-/// Untie `input` back to its original name (or to `output` if given).
-pub fn untie(input: &Path, output: Option<&Path>) -> io::Result<()> {
-    let data = fs::read(input)?;
-
-    let restored = match output {
-        Some(path) => path.to_path_buf(),
-        None => default_restored_name(input),
+    let header = Header {
+        version: format::VERSION,
+        flags: format::FLAG_STORED,
+        filename: basename(input),
+        original_size: data.len() as u64,
+        crc32: crc32(&data),
     };
 
-    fs::write(&restored, &data)?;
+    let out_path = knot_name(input);
+    let mut bytes = header.to_bytes();
+    bytes.extend_from_slice(&data);
+    fs::write(&out_path, &bytes)?;
+
     println!(
-        "untied {} -> {} ({} bytes)",
+        "tied {} -> {} ({} -> {} bytes)",
         input.display(),
-        restored.display(),
+        out_path.display(),
+        data.len(),
+        bytes.len()
+    );
+    Ok(())
+}
+
+/// Untie a `.knot` file back to the original bytes, verifying size + checksum.
+pub fn untie(input: &Path, output: Option<&Path>) -> Result<()> {
+    let file = fs::read(input)?;
+    let (header, payload) = Header::parse(&file)?;
+
+    let data = if header.is_stored() {
+        payload.to_vec()
+    } else {
+        return Err(KnotError::Corrupt(
+            "compressed payload, but this build only understands stored mode",
+        ));
+    };
+
+    if data.len() as u64 != header.original_size {
+        return Err(KnotError::SizeMismatch {
+            expected: header.original_size,
+            actual: data.len() as u64,
+        });
+    }
+    let actual = crc32(&data);
+    if actual != header.crc32 {
+        return Err(KnotError::ChecksumMismatch {
+            expected: header.crc32,
+            actual,
+        });
+    }
+
+    let out_path = match output {
+        Some(path) => path.to_path_buf(),
+        None => safe_output_name(&header.filename)?,
+    };
+    fs::write(&out_path, &data)?;
+
+    println!(
+        "untied {} -> {} ({} bytes, checksum OK)",
+        input.display(),
+        out_path.display(),
         data.len()
     );
     Ok(())
 }
 
-/// Show what we know about a `.knot` file. Stage 0 only knows its size on
-/// disk; the real header fields arrive in stage 1.
-pub fn inspect(input: &Path) -> io::Result<()> {
-    let meta = fs::metadata(input)?;
+/// Print a `.knot` file's header without untying it.
+pub fn inspect(input: &Path) -> Result<()> {
+    let file = fs::read(input)?;
+    let (header, payload) = Header::parse(&file)?;
+
+    let pct = if header.original_size > 0 {
+        file.len() as f64 / header.original_size as f64 * 100.0
+    } else {
+        0.0
+    };
+
     println!("{}", input.display());
-    println!("  size:  {} bytes", meta.len());
-    println!("  (stage 0: no .knot header to read yet)");
+    println!("  format:          KNOT v{}", header.version);
+    println!(
+        "  mode:            {}",
+        if header.is_stored() {
+            "stored (uncompressed)"
+        } else {
+            "compressed"
+        }
+    );
+    println!("  original name:   {}", header.filename);
+    println!("  original size:   {} bytes", header.original_size);
+    println!(
+        "  on-disk size:    {} bytes (header + {} payload)",
+        file.len(),
+        payload.len()
+    );
+    println!("  ratio:           {pct:.1}% of original");
+    println!("  crc32:           {:#010x}", header.crc32);
     Ok(())
 }
 
-/// Strip a trailing `.knot` to recover the original name. If there isn't one,
-/// add `.untied` so we never silently overwrite the input in place.
-fn default_restored_name(input: &Path) -> PathBuf {
-    if input.extension().is_some_and(|ext| ext == "knot") {
-        input.with_extension("")
-    } else {
-        let mut name = input.as_os_str().to_owned();
-        name.push(".untied");
-        PathBuf::from(name)
-    }
+// --- helpers ---
+
+fn crc32(data: &[u8]) -> u32 {
+    let mut hasher = crc32fast::Hasher::new();
+    hasher.update(data);
+    hasher.finalize()
+}
+
+fn knot_name(input: &Path) -> PathBuf {
+    let mut name = input.as_os_str().to_owned();
+    name.push(".knot");
+    PathBuf::from(name)
+}
+
+fn basename(input: &Path) -> String {
+    input
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| String::from("untied"))
+}
+
+/// Turn a *stored* filename into a safe output path: only its final component,
+/// never an absolute or parent path. Neutralizes `../../etc/passwd`-style names.
+fn safe_output_name(stored: &str) -> Result<PathBuf> {
+    Path::new(stored)
+        .file_name()
+        .map(PathBuf::from)
+        .ok_or(KnotError::BadFilename)
 }
