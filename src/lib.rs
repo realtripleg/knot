@@ -6,10 +6,12 @@
 //! checksum. Compression lands in later stages.
 
 pub mod bitio;
+mod codec;
 pub mod error;
 pub mod format;
 pub mod huffman;
 pub mod lz77;
+pub mod tables;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,25 +22,46 @@ use format::Header;
 /// Tie `input` into `<input>.knot` (stage 1: stored, uncompressed payload).
 pub fn tie(input: &Path) -> Result<()> {
     let data = fs::read(input)?;
+    let original_len = data.len();
+    let checksum = crc32(&data);
+
+    // Compress, but fall back to storing the raw bytes when that's smaller — a
+    // .knot must never be bigger than it has to be. Already-compressed inputs
+    // (jpegs, zips, ...) simply can't shrink, so we store them verbatim.
+    let compressed = codec::compress(&data);
+    let (flags, payload) = if compressed.len() < original_len {
+        (0u8, compressed)
+    } else {
+        (format::FLAG_STORED, data)
+    };
 
     let header = Header {
         version: format::VERSION,
-        flags: format::FLAG_STORED,
+        flags,
         filename: basename(input),
-        original_size: data.len() as u64,
-        crc32: crc32(&data),
+        original_size: original_len as u64,
+        crc32: checksum,
     };
 
     let out_path = knot_name(input);
     let mut bytes = header.to_bytes();
-    bytes.extend_from_slice(&data);
+    bytes.extend_from_slice(&payload);
     fs::write(&out_path, &bytes)?;
 
+    let pct = if original_len == 0 {
+        0.0
+    } else {
+        bytes.len() as f64 / original_len as f64 * 100.0
+    };
+    let how = if flags & format::FLAG_STORED != 0 {
+        " (stored)"
+    } else {
+        ""
+    };
     println!(
-        "tied {} -> {} ({} -> {} bytes)",
+        "tied {} -> {} ({original_len} -> {} bytes, {pct:.1}%){how}",
         input.display(),
         out_path.display(),
-        data.len(),
         bytes.len()
     );
     Ok(())
@@ -52,9 +75,7 @@ pub fn untie(input: &Path, output: Option<&Path>) -> Result<()> {
     let data = if header.is_stored() {
         payload.to_vec()
     } else {
-        return Err(KnotError::Corrupt(
-            "compressed payload, but this build only understands stored mode",
-        ));
+        codec::decompress(payload)?
     };
 
     if data.len() as u64 != header.original_size {
