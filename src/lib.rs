@@ -5,8 +5,10 @@
 //! everything around it is the actual format, and untie now verifies the
 //! checksum. Compression lands in later stages.
 
+pub mod bitio;
 pub mod error;
 pub mod format;
+pub mod huffman;
 pub mod lz77;
 
 use std::fs;
