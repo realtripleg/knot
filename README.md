@@ -5,7 +5,7 @@ smaller, and your shoes don't fall out. `knot` does the same for files: it ties 
 file into a compact `.knot` archive and unties it back, checking along the way
 that nothing came loose.
 
-It's a from-scratch DEFLATE-style compressor — LZ77 plus Huffman coding, built by
+It's a from-scratch DEFLATE-style compressor: LZ77 plus Huffman coding, built by
 hand. On plain text and source code it lands within a few percent of `gzip -9`:
 
 | input         | original |   knot | gzip -9 |
@@ -97,16 +97,16 @@ stream, ending with an end-of-block marker.
 
 ## How it works
 
-Two classic stages — the same pair `zip`/`gzip` use:
+Two classic stages, the same pair `zip`/`gzip` use:
 
 1. **LZ77** slides a 32 KB window over the input and replaces repeated byte
-   sequences with `(length, distance)` back-references — "copy 12 bytes from 400
+   sequences with `(length, distance)` back-references: "copy 12 bytes from 400
    bytes back." Anything not part of a repeat is emitted as a literal byte. This
    removes redundancy.
 
 2. **Huffman coding** then gives common symbols short bit patterns and rare ones
-   longer patterns. `knot` builds two canonical Huffman tables — one for literals
-   and match lengths, one for distances — and stores only the code lengths, since
+   longer patterns. `knot` builds two canonical Huffman tables (one for literals
+   and match lengths, one for distances) and stores only the code lengths, since
    both sides can rebuild identical codes from those alone.
 
 Untying reverses both: rebuild the Huffman tables, decode the tokens, replay the
