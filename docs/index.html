@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>knot — a from-scratch compressor</title>
+<meta name="description" content="knot: a from-scratch DEFLATE-style file compressor (LZ77 + Huffman), written in Rust.">
+<style>
+  :root{
+    --bg:#1d2021; --bg1:#282828; --bg2:#32302f; --bg3:#3c3836;
+    --fg:#ebdbb2; --dim:#a89984; --orange:#fe8019; --blue:#83a598; --green:#b8bb26;
+    --border:#3c3836;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:860px;margin:0 auto;padding:2.5rem 1.25rem 4rem}
+  a{color:var(--blue);text-decoration:none}
+  a:hover{color:var(--orange);text-decoration:underline}
+  code{background:var(--bg3);padding:.12em .38em;border-radius:4px;
+    font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.88em}
+  pre{background:#161819;border:1px solid var(--border);border-radius:8px;
+    padding:1rem;overflow-x:auto;line-height:1.5}
+  pre code{background:none;padding:0;font-size:.85rem}
+  .hero{text-align:center;padding:1rem 0 1.5rem;border-bottom:1px solid var(--border);margin-bottom:.5rem}
+  .hero h1{font-size:3rem;margin:.2rem 0;color:var(--orange);letter-spacing:.04em}
+  .hero .tag{color:var(--dim);max-width:640px;margin:.5rem auto 1.25rem}
+  .nav{display:flex;gap:1.1rem;justify-content:center;flex-wrap:wrap;font-size:.95rem}
+  section.card{background:var(--bg1);border:1px solid var(--border);border-radius:12px;
+    padding:1.25rem 1.6rem;margin:1.25rem 0}
+  h2{color:var(--orange);border-bottom:1px solid var(--border);padding-bottom:.45rem;margin:.2rem 0 1rem}
+  h3{color:var(--green);font-size:1.02rem;margin:1.2rem 0 .5rem}
+  blockquote{border-left:3px solid var(--orange);margin:0 0 1rem;padding:.3rem 0 .3rem 1rem;
+    color:var(--dim);font-style:italic}
+  table{width:100%;border-collapse:collapse;font-size:.9rem;margin:.5rem 0}
+  th,td{border:1px solid var(--border);padding:.45rem .65rem;text-align:left}
+  th{background:var(--bg2);color:var(--orange);font-weight:600}
+  .bench td:nth-child(n+2){text-align:right;font-variant-numeric:tabular-nums}
+  .tabs{display:flex;gap:.5rem;flex-wrap:wrap;margin:.5rem 0 1rem}
+  .os-tab{background:var(--bg2);color:var(--dim);border:1px solid var(--border);
+    border-radius:999px;padding:.4rem 1rem;cursor:pointer;font-size:.9rem;font-family:inherit}
+  .os-tab:hover{color:var(--fg)}
+  .os-tab.active{background:var(--orange);color:#1d2021;border-color:var(--orange);font-weight:600}
+  .os-panel{display:none}
+  .os-panel.active{display:block}
+  footer{text-align:center;color:var(--dim);font-size:.85rem;margin-top:2.5rem;
+    border-top:1px solid var(--border);padding-top:1.25rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <h1>knot</h1>
+    <p class="tag">Tie a file into a compact <code>.knot</code> archive, and untie it back. A from-scratch DEFLATE-style compressor (LZ77 + Huffman), written in Rust.</p>
+    <nav class="nav">
+      <a href="#install">Install</a>
+      <a href="#usage">Usage</a>
+      <a href="#format">File format</a>
+      <a href="#how">How it works</a>
+      <a href="https://github.com/realtripleg/knot">GitHub &#8599;</a>
+    </nav>
+  </header>
+
+  <section class="card">
+    <blockquote>Loose shoelaces are long and messy. Tie them in a knot and they're contained, smaller, and your shoes don't fall out. Same idea for files: knot cares about size <em>and</em> integrity, so every archive carries a CRC32 checksum.</blockquote>
+    <p>On plain text and source code it lands within a few percent of <code>gzip -9</code> and <code>zip</code>:</p>
+    <table class="bench">
+      <thead><tr><th>input</th><th>original</th><th>knot</th><th>gzip -9</th><th>zip -9</th></tr></thead>
+      <tbody>
+        <tr><td>Rust source</td><td>46,877</td><td>14,293</td><td>13,753</td><td>13,864</td></tr>
+        <tr><td>/etc/services</td><td>299,903</td><td>72,331</td><td>70,391</td><td>70,518</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card" id="install">
+    <h2>Install</h2>
+    <p>Prebuilt binaries are on the <a href="https://github.com/realtripleg/knot/releases/latest">releases page</a>. Pick your platform:</p>
+    <div class="tabs">
+      <button class="os-tab" data-os="linux" onclick="selectOS('linux')">Linux</button>
+      <button class="os-tab" data-os="macos" onclick="selectOS('macos')">macOS</button>
+      <button class="os-tab" data-os="windows" onclick="selectOS('windows')">Windows</button>
+    </div>
+
+    <div class="os-panel" data-os="linux">
+      <h3>Prebuilt binary</h3>
+      <pre><code>tar xzf knot-linux-x86_64.tar.gz
+sudo install -m755 knot /usr/local/bin/knot</code></pre>
+      <h3>Build from source</h3>
+      <pre><code># Arch: sudo pacman -S rustup &amp;&amp; rustup default stable
+git clone https://github.com/realtripleg/knot
+cd knot
+cargo build --release
+install -Dm755 target/release/knot ~/.local/bin/knot</code></pre>
+    </div>
+
+    <div class="os-panel" data-os="macos">
+      <h3>Prebuilt binary</h3>
+      <p>Apple Silicon &rarr; <code>knot-macos-aarch64.tar.gz</code>; Intel &rarr; <code>knot-macos-x86_64.tar.gz</code>.</p>
+      <pre><code>tar xzf knot-macos-*.tar.gz
+sudo install -m755 knot /usr/local/bin/knot
+# clear the "unidentified developer" quarantine flag
+xattr -d com.apple.quarantine /usr/local/bin/knot</code></pre>
+      <h3>Build from source</h3>
+      <pre><code># install rustup from https://rustup.rs, then:
+git clone https://github.com/realtripleg/knot
+cd knot
+cargo build --release
+sudo install -m755 target/release/knot /usr/local/bin/knot</code></pre>
+    </div>
+
+    <div class="os-panel" data-os="windows">
+      <h3>Prebuilt binary</h3>
+      <p>Download <code>knot-windows-x86_64.zip</code> and extract <code>knot.exe</code>. Run it from that folder, or add it to your <code>Path</code> (PowerShell):</p>
+      <pre><code>mkdir $env:USERPROFILE\bin -Force
+move knot.exe $env:USERPROFILE\bin
+[Environment]::SetEnvironmentVariable("Path", $env:Path + ";$env:USERPROFILE\bin", "User")</code></pre>
+      <h3>Build from source</h3>
+      <pre><code># install rustup from https://rustup.rs, then in PowerShell:
+git clone https://github.com/realtripleg/knot
+cd knot
+cargo build --release   # target\release\knot.exe</code></pre>
+    </div>
+  </section>
+
+  <section class="card" id="usage">
+    <h2>Usage</h2>
+    <p>Three verbs: <code>tie</code> (compress), <code>untie</code> (decompress), <code>inspect</code> (metadata).</p>
+
+    <h3>tie &mdash; compress</h3>
+    <pre><code>$ knot tie report.txt
+tied report.txt -&gt; report.txt.knot (46877 -&gt; 14291 bytes, 30.5%)</code></pre>
+    <p>Writes a <code>.knot</code> next to the original. Inputs that can't shrink are stored verbatim, so the archive never grows.</p>
+
+    <h3>untie &mdash; decompress</h3>
+    <pre><code>$ knot untie report.txt.knot
+untied report.txt.knot -&gt; report.txt (46877 bytes, checksum OK)</code></pre>
+    <p>Restores the original bytes and verifies the CRC32 checksum. Use <code>-o</code>/<code>--output</code> to restore elsewhere.</p>
+
+    <h3>inspect &mdash; metadata</h3>
+    <pre><code>$ knot inspect report.txt.knot
+report.txt.knot
+  format:          KNOT v1
+  mode:            compressed
+  original name:   report.txt
+  original size:   46877 bytes
+  on-disk size:    14291 bytes (header + 14260 payload)
+  ratio:           30.5% of original
+  crc32:           0xc03cba1e</code></pre>
+  </section>
+
+  <section class="card" id="format">
+    <h2>File format</h2>
+    <p>A <code>.knot</code> file is a fixed header followed by the payload. Integers are little-endian.</p>
+    <table>
+      <thead><tr><th>offset</th><th>size</th><th>field</th></tr></thead>
+      <tbody>
+        <tr><td>0</td><td>4</td><td>magic bytes <code>KNOT</code></td></tr>
+        <tr><td>4</td><td>1</td><td>format version (currently 1)</td></tr>
+        <tr><td>5</td><td>1</td><td>flags (bit 0 = stored / uncompressed)</td></tr>
+        <tr><td>6</td><td>2</td><td>filename length <code>N</code></td></tr>
+        <tr><td>8</td><td>N</td><td>original filename (UTF-8, basename only)</td></tr>
+        <tr><td>8+N</td><td>8</td><td>original size in bytes</td></tr>
+        <tr><td>16+N</td><td>4</td><td>CRC32 of the original bytes</td></tr>
+        <tr><td>20+N</td><td>&hellip;</td><td>payload (compressed, or raw if stored)</td></tr>
+      </tbody>
+    </table>
+    <p>The compressed payload is a single bitstream: two Huffman code-length tables (286 literal/length codes and 30 distance codes, 4 bits each), then the token stream, ending with an end-of-block marker.</p>
+  </section>
+
+  <section class="card" id="how">
+    <h2>How it works</h2>
+    <p>Two classic stages, the same pair <code>zip</code> and <code>gzip</code> use:</p>
+    <ol>
+      <li><strong>LZ77</strong> slides a 32&nbsp;KB window over the input and replaces repeated byte sequences with <code>(length, distance)</code> back-references ("copy 12 bytes from 400 bytes back"). Anything not part of a repeat is emitted as a literal byte.</li>
+      <li><strong>Huffman coding</strong> gives common symbols short bit patterns and rare ones longer patterns. knot builds two canonical Huffman tables (one for literals and match lengths, one for distances) and stores only the code lengths, since both sides rebuild identical codes from those alone.</li>
+    </ol>
+    <p>Untying reverses both, then confirms the size and checksum match what was stored.</p>
+  </section>
+
+  <footer>
+    knot v1.0.0 &middot; <a href="https://github.com/realtripleg/knot">source on GitHub</a> &middot; built with Rust
+  </footer>
+
+</div>
+
+<script>
+  function selectOS(os){
+    document.querySelectorAll('.os-tab').forEach(function(b){ b.classList.toggle('active', b.dataset.os === os); });
+    document.querySelectorAll('.os-panel').forEach(function(p){ p.classList.toggle('active', p.dataset.os === os); });
+  }
+  (function(){
+    var ua = navigator.userAgent, os = 'linux';
+    if (/Windows/i.test(ua)) os = 'windows';
+    else if (/Mac|iPhone|iPad|iPod/i.test(ua)) os = 'macos';
+    selectOS(os);
+  })();
+</script>
+</body>
+</html>

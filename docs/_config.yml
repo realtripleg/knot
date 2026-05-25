@@ -1,3 +1,0 @@
-title: knot
-description: A from-scratch DEFLATE-style file compressor (LZ77 + Huffman), written in Rust.
-theme: jekyll-theme-cayman
