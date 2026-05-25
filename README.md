@@ -13,9 +13,38 @@ hand. On plain text and source code it lands within a few percent of `gzip -9`:
 | Rust source   |   46,877 | 14,291 |  13,751 |
 | /etc/services |  299,903 | 72,324 |  70,384 |
 
-## Install (Arch Linux)
+## Install
 
-Build from source with a stable Rust toolchain:
+### Prebuilt binaries
+
+Download the build for your platform from the
+[Releases](https://github.com/realtripleg/knot/releases) page:
+
+| platform              | asset                       |
+|-----------------------|-----------------------------|
+| Linux (x86_64)        | `knot-linux-x86_64.tar.gz`  |
+| macOS (Apple Silicon) | `knot-macos-aarch64.tar.gz` |
+| macOS (Intel)         | `knot-macos-x86_64.tar.gz`  |
+| Windows (x86_64)      | `knot-windows-x86_64.zip`   |
+
+**Linux and macOS**
+
+```sh
+tar xzf knot-*.tar.gz
+sudo install -m755 knot /usr/local/bin/knot
+# macOS only: clear the "unidentified developer" quarantine flag
+xattr -d com.apple.quarantine /usr/local/bin/knot 2>/dev/null || true
+```
+
+**Windows**
+
+Extract `knot.exe` from the zip, then run it from that folder or move it into a
+directory on your `Path`. It's a self-contained executable; there's nothing else
+to install.
+
+### Build from source
+
+Needs a stable Rust toolchain (install `rustup`, then `rustup default stable`):
 
 ```sh
 git clone https://github.com/realtripleg/knot
@@ -23,14 +52,12 @@ cd knot
 cargo build --release
 ```
 
-The binary is `target/release/knot`. Put it on your `PATH`, for example:
+The binary is `target/release/knot` (`target\release\knot.exe` on Windows). On
+Linux and macOS, drop it on your `PATH`:
 
 ```sh
 install -Dm755 target/release/knot ~/.local/bin/knot
 ```
-
-If you don't have Rust yet, install the `rustup` package and run
-`rustup default stable`.
 
 ## Usage
 
@@ -111,7 +138,3 @@ Two classic stages, the same pair `zip`/`gzip` use:
 
 Untying reverses both: rebuild the Huffman tables, decode the tokens, replay the
 back-references, then confirm the size and checksum match what was stored.
-
-## License
-
-Not yet decided.
